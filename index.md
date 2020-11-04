@@ -10,7 +10,6 @@ This is the repeat of "Differentiation of transplanted haematopoietic stem cells
 
 ### Figure 1-3
 1. [Figure 1](https://xinming-w.github.io/study_ncb_2020/html_pages/05.html)
-)
 2. [Figure 2](https://xinming-w.github.io/study_ncb_2020/html_pages/06.html)
 3. [Figure 3](https://xinming-w.github.io/study_ncb_2020/html_pages/07.html)
 
