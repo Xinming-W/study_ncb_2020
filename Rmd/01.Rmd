@@ -1,0 +1,132 @@
+---
+title: "Quality control on cells and genes"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## QC and data process
+
+the number of transplantation cells we had used for this step was more than 2879. This is the reason the cell number remain on this step is not equally to 2301, the number of cells retained for further analysis. 
+
+### Quality control on cells and genes for homeostasis and transplantation cells respectively
+
+
+
+```{r}
+
+### load raw cell and meta data
+rm(list=ls())
+pwd <- getwd()
+pwd <- substr(pwd,1,nchar(pwd)-8)
+load(paste0(pwd,"/input/01.RawCell_UMI_TPM_Meta.Rdata")) 
+```
+there are three data tables: raw_cells, raw.counts and raw.tpm:\
+raw_cells contains the information of 2879 cells.
+```{r}
+dim(raw_cells)
+```
+```{r echo=FALSE}
+knitr::kable(head(raw_cells),caption="raw_cells")
+
+```
+The raw.counts and raw.tpm are the genes(23154) expression of the cells(2879).
+```{r}
+dim(raw.counts)
+dim(raw.tpm)
+```
+### Create the output dir
+```{r}
+dir.create(paste0(pwd,"/output"))
+```
+### homeostasis data
+```{r}
+metadata.Ho <- raw_cells[raw_cells$Ho_Tx == "Ho",]
+cells.idx.Ho <- match(rownames(metadata.Ho), colnames(raw.counts))
+all.counts.Ho <- as.data.frame(raw.counts[, cells.idx.Ho])
+dim(all.counts.Ho) # 23154  1569
+ 
+```
+
+### Transpantation data
+```{r}
+
+metadata.Tx <- raw_cells[raw_cells$Ho_Tx == "Tx",]
+cells.idx.Tx <- match(rownames(metadata.Tx), colnames(raw.counts))
+all.counts.Tx <- as.data.frame(raw.counts[, cells.idx.Tx])
+dim(all.counts.Tx) # 23154  1310
+```
+### Quality contol 
+#### function 1
+SQCstat function can get the total counts of the cell and the total expressed genes of the cell.
+```{r}
+SCQCstat <- function(data=data, is.expr=1){
+  total_counts <- colSums(data, na.rm = T)
+  total_genes <- apply(data, 2, function(x){
+    sum(x>=is.expr)
+  })
+  return(list("total_counts"=total_counts, "total_genes"=unlist(total_genes)))#unlist ???未看懂，按道理此处返回的向量值，当然unlist可以在返回列表时提取出里面的向量
+}
+
+```
+#### function 2 
+QC function is the main function for HO and Tx quality contol
+```{r}
+QC <- function(x){   #原来这里有个label没用的变量，删了
+     if(x=="Ho"){
+	 counts.input <- all.counts.Ho  
+     meta.input <- metadata.Ho
+	 } else {
+	 counts.input <- all.counts.Tx
+     meta.input <- metadata.Tx
+	 }
+     # first qc:quality control for cells and genes
+     counts.qc <- SCQCstat(counts.input)
+     #get the useless data per phenotype
+     size.drop <- scater::isOutlier(counts.qc$total_counts, nmads=3, type="both", log=F, batch = meta.input$phenotype)
+     gene.drop <- scater::isOutlier(counts.qc$total_genes, nmads=3, type="both", log=F, batch = meta.input$phenotype)
+     counts.filter <- counts.input[, !(size.drop | gene.drop)]
+     #second qc:filtering with gene number and umi counts
+     counts.filter.qc <- SCQCstat(counts.filter)
+     # set the threshold value of the express gene number and the counts number
+     gene.count <- 1000
+     umi.count <- 20000
+     counts.filter <- counts.filter[, counts.filter.qc$total_counts >= umi.count & counts.filter.qc$total_genes >= gene.count]
+     dim(counts.filter) # Ho:23154 1270; Tx:23154  1059
+      # last qc:filtering low abundance genes
+     counts.filter.qc <- SCQCstat(counts.filter)
+     ave.cut <- 0.2
+     ave.counts <- rowMeans(counts.filter)
+     counts.filter <- counts.filter[ log10(ave.counts) >= log10(ave.cut),]#此处这个0.2并没有过滤任何基�?
+  #save data
+	 if(x=="Ho"){
+     filter.counts.Ho <- counts.filter
+     filter.tpm.Ho <- raw.tpm[row.names(counts.filter), colnames(counts.filter)]
+     meta.Ho <- meta.input[colnames(counts.filter),]
+	 counts.Ho <- counts.input[,colnames(counts.filter)]
+	 tpm.Ho <- raw.tpm[,colnames(counts.filter)]
+	 save(filter.tpm.Ho, filter.tpm.Ho, counts.Ho, tpm.Ho, meta.Ho, file = paste0(pwd,"/input/01.Homeostasis.Cells.UMI_TPM_metadata.RData"))
+	 return(meta.Ho)
+	 } else {
+     filter.counts.Tx <- counts.filter
+     filter.tpm.Tx <- raw.tpm[row.names(counts.filter), colnames(counts.filter)]
+     meta.Tx <- meta.input[colnames(counts.filter),]	 
+	 counts.Ho <- counts.input[,colnames(counts.filter)]
+	 tpm.Ho <- raw.tpm[,colnames(counts.filter)]
+	 save(filter.counts.Tx, filter.tpm.Tx, counts.Ho, tpm.Ho, meta.Tx,file = paste0(pwd,"/input/01.Transplantation.Cells.UMI_TPM_metadata.RData"))  
+	 return(meta.Tx)
+	 }
+}
+
+```
+#### QC
+```{r}
+meta.Ho <- QC("Ho")
+meta.Tx <- QC("Tx")
+## homeostasis cells remain 
+dim(meta.Ho) # 1270   10
+## transplantation cells remain 
+dim(meta.Tx) # 1059   10 
+```

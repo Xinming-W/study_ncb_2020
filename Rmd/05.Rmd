@@ -1,0 +1,284 @@
+---
+title: "Codes for Figure1"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+## Generating figures 1b-d and 1f
+#### Set up the environment and load the data
+```{r}
+rm(list=ls())
+pwd <- getwd()
+pwd <- substr(pwd,1,nchar(pwd)-8)
+library(pheatmap)
+library(grid)
+### load expression and meta data of homeostasis and transplantation cell
+load(paste0(pwd,"/input/01.QC.Comb.cell.count.tpm.meta.Rdata"))
+### load HSC PCA top genes and homeostasis cell clusters
+load(paste0(pwd,"/input/02.pc.topGenes.HSC.RData"))
+load(paste0(pwd,"/input/02.Homeostasis.Cells_cluster_pc.topGenes.RData"))
+```
+
+### Figure 1b
+Heatmap and unsupervised hierarchical clustering of diversely expressed genes in five iHSCs populations. Representative GO enrichments of specifically expressed genes for each cluster are listed on the right. Three clusters of HSCs (tHSC1, tHSC2 and tHSC3) were grouped according to the transcriptome profiles. ER, endoplasmic reticulum; HSC<sup>LT</sup>, long-term HSC. 
+```{r}
+cell.type <- "HSC"
+cell.subtype <- c("LT_HSC", "Fraction I", "Fraction III", "ESLAM", "ESLAMSK") 
+# number of gene sets distinguishing cell type subsets 
+max(pc.genes[pc.genes$Celltype == cell.type,]$Cluster) # 4
+# number of subsets within HSC cell type 
+max(pc.cells[pc.cells$Celltype == cell.type,]$Cluster) # 3
+```
+
+For HSC, genes have 4 clusters and cells have 3 clusters, so we can set the row cut 4 and the column cut 3 for the heatmap
+```{r}
+cut.row <- 4
+cut.col <- 3
+```
+
+plot the heatmap
+```{r}
+#305 cells of HSCs
+input.meta <- comb.data.meta[pc.cells[pc.cells$Celltype == cell.type,]$Cell,] 
+input.mtx <- comb.data.tpm[pc.topGenes, rownames(input.meta)]
+### the following codes are similar to the second part.
+input.dist.row <- as.dist(1-cor(t(input.mtx), method = "pearson"))
+input.clust.row <- hclust(input.dist.row, method = "ward.D2")
+input.dist.col <- as.dist(1-cor(input.mtx, method = "pearson"))
+input.clust.col <- hclust(input.dist.col, method = "ward.D2")
+col.panel <- colorRampPalette(colors = c("black", "gold"))
+input.cutree.row <- cutree(input.clust.row, k = cut.row)
+input.cutree.col <- cutree(input.clust.col, k = cut.col)
+input.meta$clusters <- input.cutree.col
+input.meta <- input.meta[order(input.meta$clusters),]
+
+input.heatmap <- pheatmap(input.mtx, color=col.panel(100), cluster_rows = T,
+                          cluster_cols = T, legend = T, show_colnames = F, show_rownames = F,
+                          clustering_distance_rows = "correlation", clustering_distance_cols = "correlation",
+                          clustering_method = "ward.D2", 
+                          annotation_col = data.frame("Cell clusters" = factor(input.meta$clusters), "Cell type" = input.meta$phenotype, row.names= row.names(input.meta)),
+                          annotation_row = data.frame("Gene clusters" = factor(input.cutree.row), row.names = pc.topGenes),
+                          cutree_rows = max(input.cutree.row), cutree_cols = max(input.cutree.col))
+```
+
+and we can alse see the expression distribution of the selected genes
+```{r}
+# visualised expression distribution
+library(data.table)
+library(ggplot2)
+ggplot(reshape2::melt(input.mtx),aes(x=value))+geom_line(stat="density",colour="black")
+```
+
+We can increase contrast by set genes expression level higher than 8 equally to 8.
+```{r}
+#set genes expression level higher than 8 equally to 8, and visualise clustering
+input.mtx[ input.mtx > 8] <- 8
+#pdf(paste0(pwd,"/output/Figure.1b.", cell.type, ".clustering.heatmap.pdf"), onefile = F)
+pheatmap(input.mtx, color=col.panel(100), cluster_rows = input.heatmap$tree_row,
+         cluster_cols = input.heatmap$tree_col, legend = T, show_colnames = F, show_rownames = F,
+         annotation_col = data.frame("Cell clusters" = factor(input.meta$clusters), "Cell type" = input.meta$phenotype, row.names= row.names(input.meta)),
+         annotation_row = data.frame("Gene clusters" = factor(input.cutree.row), row.names = pc.topGenes),
+         cutree_rows = max(input.cutree.row), cutree_cols = max(input.cutree.col),
+         main = paste(cell.type, "clustering"))
+```
+
+### Figure 1c
+UMAP plot showing the three heterogeneous clusters of five iHSC populations: tHSC1 (n = 189), tHSC2 (n = 93) and tHSC3 (n = 23)
+
+<font color=red>
+Warning: The package version is updated. this paper uses Seurat2 and monocle2 to analysis the data and plot. Here we use Seurat3 and monocle3. So there are some changes in the code, but they do not affect the results.
+</font>
+```{r}
+### note:figure 1c showed slightly different from published one for uwot
+### packages had updated and same parameters we had used were missing.
+library(Seurat)
+library(uwot)
+input.umi <- comb.data.counts[,rownames(input.meta)]
+raw.obj <- CreateSeuratObject(
+	counts = input.umi, min.cells = 3, min.genes = 0, 
+	meta.data = input.meta, project = "HSC")
+raw.obj <- NormalizeData(object = raw.obj, normalization.method = "LogNormalize", scale.factor = 10000)
+raw.obj <- ScaleData(raw.obj, display.progress = F)
+raw.obj <- FindVariableFeatures(object = raw.obj, mean.function = ExpMean, dispersion.function = LogVMR, x.low.cutoff = 0.25, x.high.cutoff = 3, y.cutoff = 0.5)
+length(x = raw.obj@assays$RNA@var.features)
+high.var.gene = raw.obj@assays$RNA@var.features[1:1101]
+raw.obj <- RunPCA(object = raw.obj,pc.genes =high.var.gene, do.print = TRUE, pcs.print = 1:5, genes.print = 5)
+# extract PCA for uwot
+data.plot <- as.matrix(raw.obj@reductions$pca@cell.embeddings)
+set.seed(123)
+umap <- umap(data.plot[,1:11],n_neighbors = 15, n_components = 3, metric = "euclidean",
+     n_epochs = NULL, scale = FALSE, init = "random", min_dist=0.5, spread=0.7,
+	 set_op_mix_ratio = 1,local_connectivity = 1, bandwidth = 1, repulsion_strength = 1,
+     target_weight = 0.5)
+umap <- as.data.frame(umap)
+colnames(umap) <- paste0("UMAP",c(1:3))
+rownames(umap) <- rownames(raw.obj@meta.data)
+umap <- cbind(umap[,c(1:2)],raw.obj@meta.data)
+umap$celltype <- paste0("tHSC",umap$cluster)
+theme_imfo <- theme(legend.position="right",legend.spacing.y = unit(0.1, 'cm'),legend.text = element_text(colour="black", size=6), 
+	axis.text=element_text(size=8,color="black"),axis.text.x=element_text(size=8),axis.title.x = element_text(size = 8),
+	axis.text.y = element_text(size = 8,color="black"),axis.title.y = element_text(size = 8),panel.grid.minor = element_blank())
+ggplot(data=umap, aes(x=UMAP1, y=UMAP2,colour=celltype)) + geom_point(aes(colour=celltype),alpha=1,size=1) + 
+	 labs(fill="Celltype")+ guides(fill=guide_legend(keywidth=0.1,keyheight=0.1,default.unit="inch")) + 
+     xlab("UMAP1") + ylab("UMAP2") + theme_imfo
+```
+
+<strong><font color="black">The clustering of 305 HSC cells is not completely separate in the umap plot. Here we use Seurat's PCA,UMAP,TSNE and PHATE to see the dimensionality reduction effects of these different methods.</font></strong>
+```{r}
+#pca of HSC
+pca1to4_seurat <- as.data.frame(raw.obj@reductions$pca@cell.embeddings[,1:4])
+colnames(pca1to4_seurat) <- paste("PCA",1:4,sep = "")
+rownames(pca1to4_seurat) <- rownames(raw.obj@meta.data)
+pca1to4_seurat <- cbind(pca1to4_seurat,raw.obj@meta.data)
+pca1to4_seurat$celltype <- paste0("tHSC",pca1to4_seurat$cluster)
+theme_imfo <- theme(legend.position="right",legend.spacing.y = unit(0.1, 'cm'),legend.text = element_text(colour="black", size=6), 
+                    axis.text=element_text(size=8,color="black"),axis.text.x=element_text(size=8),axis.title.x = element_text(size = 8),
+                    axis.text.y = element_text(size = 8,color="black"),axis.title.y = element_text(size = 8),panel.grid.minor = element_blank())
+PCA_plot <- ggplot(data=pca1to4_seurat, aes(x=PCA1, y=PCA2,colour=celltype)) + geom_point(aes(colour=celltype),alpha=1,size=1) + 
+  labs(fill="Celltype")+ guides(fill=guide_legend(keywidth=0.1,keyheight=0.1,default.unit="inch")) + 
+  xlab("PCA1") + ylab("PCA2") + theme_imfo
+#seurat umap of HSC
+raw.obj <- RunUMAP(raw.obj,dims = 1:11,n.neighbors = 15,n.components = 3)
+umap_seurat <- umap
+umap_seurat$UMAP1 <- raw.obj@reductions$umap@cell.embeddings[,1]
+umap_seurat$UMAP2 <- raw.obj@reductions$umap@cell.embeddings[,2]
+UMAP_plot <- ggplot(data=umap_seurat, aes(x=UMAP1, y=UMAP2,colour=celltype)) + geom_point(aes(colour=celltype),alpha=1,size=1) + 
+  labs(fill="Celltype")+ guides(fill=guide_legend(keywidth=0.1,keyheight=0.1,default.unit="inch")) + 
+  xlab("UMAP1") + ylab("UMAP2") + theme_imfo
+#seurat tsne of HSC
+raw.obj <- RunTSNE(raw.obj,dims = 1:11)
+tsne_seurat <- umap
+tsne_seurat$UMAP1 <- raw.obj@reductions$tsne@cell.embeddings[,1]
+tsne_seurat$UMAP2 <- raw.obj@reductions$tsne@cell.embeddings[,2]
+colnames(tsne_seurat)[1:2] <- c("TSNE1","TSNE2")
+TSNE_plot <- ggplot(data=tsne_seurat, aes(x=TSNE1, y=TSNE2,colour=celltype)) + geom_point(aes(colour=celltype),alpha=1,size=1) + 
+  labs(fill="Celltype")+ guides(fill=guide_legend(keywidth=0.1,keyheight=0.1,default.unit="inch")) + 
+  xlab("TSNE1") + ylab("TSNE2") + theme_imfo
+
+#phate of HSC
+library(phateR)
+rawdata <- GetAssayData(raw.obj)
+phate_rawdata <- raw.obj@assays$RNA@scale.data[high.var.gene[1:1101],]
+phate_reduc <- phate(t(phate_rawdata),knn = 15)
+phate_seurat <- umap
+phate_seurat$UMAP1 <- phate_reduc$embedding[,1]
+phate_seurat$UMAP2 <- phate_reduc$embedding[,2]
+colnames(phate_seurat)[1:2] <- paste("PHATE",1:2,sep = "")
+PHATE_plot <- ggplot(data=phate_seurat, aes(x=PHATE1, y=PHATE2,colour=celltype)) + geom_point(aes(colour=celltype),alpha=1,size=1) + 
+  labs(fill="Celltype")+ guides(fill=guide_legend(keywidth=0.1,keyheight=0.1,default.unit="inch")) + 
+  xlab("PHATE1") + ylab("PHATE2") + theme_imfo
+CombinePlots(list(PCA_plot,UMAP_plot,TSNE_plot,PHATE_plot),nrow =2)
+```
+
+The clustering of 305 HSC cells is not completely separate in these reduction plots. There are tow possible reasons I guess: technical noise of experience or biological phenomenon(The HSC cells themselves can't be completely divided because of their potential to differentiate).
+
+### Figure 1d 
+Box plots showing the distribution of normalized expression values (log2(TPM/10 + 1)) of specifically expressed genes in tHSC1 (n = 189), tHSC2 (n = 93) and tHSC3 (n = 23).
+```{r}
+library(ggpubr)
+library(data.table)
+genes <- c("Egr1","Nr4a1","Sh3gl1","S100a9","Cd79a","Blnk") #these genes are not in pc.topGene and high.var.gene,but in pc.gene.
+input.mtx <- comb.data.tpm[genes, row.names(input.meta)]
+input.meta$celltype <- paste0("tHSC",input.meta$clusters)
+cell.info <- as.data.frame(input.meta[,"celltype"],row.names=rownames(input.meta),stringsAsFactors=F)
+Mat <- cbind(cell.info,t(input.mtx))
+mMat <- reshape2::melt(Mat)
+colnames(mMat) <- c("celltype","gene","Expr")
+mMat$celltype = factor(mMat$celltype,levels=c("tHSC1","tHSC2","tHSC3"))
+
+ggplot(mMat,aes(x=celltype,y=Expr)) + 
+         geom_boxplot(aes(fill = celltype)) +
+         xlab("celltype")+ ylab("log2(TPM+1)") + 
+		 ggtitle("HSC specific genes") + coord_cartesian(ylim = c(0, 10)) + 
+  theme(panel.background = element_blank(),panel.grid=element_line(color="black",size=0.5))	+	 
+  facet_wrap(~gene,ncol=2)
+```
+
+### Figure 1e
+Histograms showing the compositions of each tHSC by five iHSC populations
+```{r}
+library(corrplot)
+library(ggplot2)
+library(plyr)
+### load data
+load(paste0(pwd,"/input/05.Cluster.renumber.tMPPs.tsne.homeostasis_transplantation.RData"))
+
+
+# calculate each phenotype cell percentages in predicted cell types
+tsne.df.hsc <- tsne.df[tsne.df$predict_cell_type %in% c("tHSC1","tHSC2","tHSC3") & tsne.df$Time=="Ho",]
+count.data <- ddply(tsne.df.hsc, .(predict_cell_type, phenotype), summarize, counts= length(phenotype))
+percent.data <- ddply(count.data, .(predict_cell_type), summarise, phenotype=phenotype, counts=counts, percent=counts/sum(counts))
+cell.order <- c("LT_HSC", "Fraction I", "Fraction III", "ESLAM", "ESLAMSK") 
+cell.order.predict <- c("tHSC1","tHSC2","tHSC3")
+percent.data$phenotype <- factor(percent.data$phenotype,levels=cell.order,ordered=T)
+percent.data$predict_cell_type <- factor(percent.data$predict_cell_type,levels=cell.order.predict,ordered=T)
+percent.data <- percent.data[ order(percent.data$predict_cell_type, percent.data$phenotype), ]
+
+
+ggplot(data=percent.data, aes(fill=phenotype)) + 
+     geom_bar(aes(x=predict_cell_type, y=percent), stat = "identity") + 
+     theme(legend.position="right") + 
+     scale_fill_manual(name="celltype",values=c("LT_HSC"="#AFD0E8","Fraction I"="#E08BB8","Fraction III"="#5183C4","ESLAM"="#33AE3E",
+     "ESLAMSK"="#ED7A92",breaks=cell.order)) + 
+     guides(fill=guide_legend(keywidth=0.2,keyheight=0.1,default.unit="inch")) +
+     xlab("celltype") + ylab("Percentages") 
+     
+```
+
+### Figure 1f
+Pie graph showing the compositions of each iHSC population by tHSCs
+```{r}
+# calculate each predicted cell type percentages in phenotype cells
+count.data <- ddply(tsne.df.hsc, .(phenotype, predict_cell_type), summarize, counts= length(predict_cell_type))
+percent.data <- ddply(count.data, .(phenotype), summarise, predict_cell_type=predict_cell_type, counts=counts, percent=counts/sum(counts))
+percent.data$phenotype <- factor(percent.data$phenotype,levels=cell.order,ordered=T)
+percent.data$predict_cell_type <- factor(percent.data$predict_cell_type,levels=cell.order.predict,ordered=T)
+percent.data <- percent.data[ order(percent.data$predict_cell_type, percent.data$phenotype), ]
+
+
+Cellfreq <- data.frame("phenotype" = NULL, "predict_cell_type" = NULL, "counts"= NULL,"percent"= NULL,stringsAsFactors = F)
+for(i in cell.order.predict){
+	 thisfreq <- data.frame("phenotype" = cell.order,"predict_cell_type" = i,"counts" = 0, "percent" = 0)
+	 filter <- percent.data[percent.data$predict_cell_type==i,]
+	 thisfreq <- rbind(filter,thisfreq)
+	 thisfreq <- thisfreq[!duplicated(thisfreq$phenotype),] 
+	 thisfreq$phenotype <- factor(thisfreq$phenotype,levels=cell.order,ordered=T)
+	 thisfreq <- thisfreq[order(thisfreq$phenotype),]
+	 Cellfreq <- rbind(Cellfreq,thisfreq)
+	 }
+
+
+## convert percentage value into a numeric matrix
+Mat <- matrix(NA,nrow=length(cell.order),ncol=length(cell.order.predict))
+rownames(Mat) <- cell.order
+colnames(Mat) <- cell.order.predict
+for(i in 1:length(cell.order.predict)){
+     j <- cell.order.predict[i]
+     Mat[,j] <- Cellfreq[Cellfreq$predict_cell_type==j,"percent"]
+	 }
+dat <- apply(Mat,2,as.numeric)
+rownames(dat) <- rownames(Mat)
+# plot
+col <- colorRampPalette(c( 'white','orange','red3'))
+corrplot(dat, is.corr = FALSE,tl.cex = 0.8,addCoef.col = "black",
+     addrect = 2,
+     rect.col = "white",
+     method="circle",
+     cl.lim=c(0,1),
+	 cl.length=3,
+     addCoefasPercent = FALSE,
+     col=col(100),
+	 cl.pos="b",
+	 cl.cex = 0.8,
+	 cl.ratio = 0.15,
+	 number.cex=0.8,
+     number.font=1,
+     tl.col="black")
+```
+
+
+
+
+

@@ -1,0 +1,40 @@
+---
+title: "Construct tSNE map"
+
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+## Constructing homeostasis and transplantation cells differentiation tsne map
+
+###  Set up the environment and load the data
+```{r}
+
+rm(list=ls())
+pwd <- getwd()
+pwd <- substr(pwd,1,nchar(pwd)-8)
+library(Seurat)
+### load expression and meta table of cells under homeostasis and transplantation 
+load(paste0(pwd,"/input/01.QC.Comb.cell.count.tpm.meta.Rdata"))
+dim(comb.data.counts)
+### load PCA top genes and clusters of homeostasis cells
+load(paste0(pwd,"/input/02.Homeostasis.Cells_cluster_pc.topGenes.RData"))
+
+```
+
+### Tsne
+```{r}
+
+comb.pc <- prcomp(t(comb.data.tpm[pc.genes$Gene,rownames(comb.data.meta)]))#,rownames(comb.data.meta) is redundant
+comb.dist <- dist(comb.pc$x[,1:10])#Take the first ten PCs
+set.seed(123)
+comb.tsne <- Rtsne::Rtsne(comb.dist, is_distance=TRUE, perplexity=30, check_duplicates=F,                            verbose = TRUE,max_iter=1500, theta=0)
+plot(comb.tsne$Y, pch=20)
+# save data
+cell.names <- attr(comb.dist, "Labels")
+save(cell.names, comb.tsne, file = paste0(pwd,"/input/04.Comb_tsne.homeostasis_transplantation.RData"))
+
+```
+
